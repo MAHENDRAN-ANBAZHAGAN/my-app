@@ -1,41 +1,60 @@
-node{
-   stage('SCM Checkout'){
-     git 'https://github.com/damodaranj/my-app.git'
-   }
-   stage('Compile-Package'){
+pipeline {
+    agent any
 
-      def mvnHome =  tool name: 'maven3', type: 'maven'   
-      sh "${mvnHome}/bin/mvn clean package"
-	  sh 'mv target/myweb*.war target/newapp.war'
-   }
-   stage('SonarQube Analysis') {
-	        def mvnHome =  tool name: 'maven3', type: 'maven'
-	        withSonarQubeEnv('sonar') { 
-	          sh "${mvnHome}/bin/mvn sonar:sonar"
-	        }
-	    }
-   stage('Build Docker Imager'){
-   sh 'docker build -t saidamo/myweb:0.0.2 .'
-   }
-   stage('Docker Image Push'){
-   withCredentials([string(credentialsId: 'dockerPass', variable: 'dockerPassword')]) {
-   sh "docker login -u saidamo -p ${dockerPassword}"
+    stages {
+        stage('SCM_CHECKOUT') {
+            steps {
+                git 'https://github.com/MAHENDRAN-ANBAZHAGAN/my-app'
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+              script {
+             withSonarQubeEnv(credentialsId: 'SonarQube_token') {
+                 
+              sh 'mvn clean verify sonar:sonar'
+             }
+            }
+            
+            }
+        }
+            stage('Maven Compile') {
+            steps {
+                sh 'whoami'
+                sh script: 'mvn clean install'
+                sh 'mv target/myweb*.war target/newapp.war'
+            }
+        }
+            stage('Build Docker Image') {
+            steps {
+                script {
+                    
+                    sh 'cd /var/lib/jenkins/workspace/project'
+                    def dockerImage = docker.build("mahendran1996anbazhagan/myweb:0.0.2", "--file Dockerfile .")
+                }
+            }
+        }
+            stage('Push Image to ECR') {
+            steps {
+                script {
+                    docker.withRegistry(
+                        'https://174047634073.dkr.ecr.ap-southeast-2.amazonaws.com',
+                        'ecr:ap-southeast-2:my.aws.credentials') {
+                            def myImage = docker.build('anbu')
+                            myImage.push('latest')
+                        }
+                    }
+                }
+        }
+            stage('EKS Deploy') {
+            steps {
+                
+                echo 'Deploying on EKS'
+                withKubeCredentials(kubectlCredentials: [[caCertificate: '', clusterName: '', contextName: '', credentialsId: 'k8s', namespace: '', serverUrl: '']]) {
+               
+                 sh 'kubectl apply -f /var/lib/jenkins/mainservice.yaml'
+             }
+            }
+        }
     }
-   sh 'docker push saidamo/myweb:0.0.2'
-   }
-   stage('Nexus Image Push'){
-   sh "docker login -u admin -p admin123 3.109.217.180:8083"
-   sh "docker tag saidamo/myweb:0.0.2 3.109.217.180:8083/damo:1.0.0"
-   sh 'docker push 3.109.217.180:8083/damo:1.0.0'
-   }
-	stage('Remove Previous Container'){
-	try{
-		sh 'docker rm -f tomcattest'
-	}catch(error){
-		//  do nothing if there is an exception
-	}
-      stage('Docker deployment'){
-   sh 'docker run -d -p 8090:8080 --name tomcattest saidamo/myweb:0.0.2' 
-   }
-}
 }
